@@ -30,6 +30,9 @@ class Creature(Agent):
             self.cool_down()
         else:
             self.heat_up()
+            
+        if self.is_food():
+            self.consume_food()
         
         self.base_tirement()
 
@@ -69,3 +72,11 @@ class Creature(Agent):
 
     def movement_tirement(self):
         self.energy -= Creature.E_MOVEMENT_DRAIN_RATE
+
+    def is_food(self) -> bool:
+        if self.model.food_grid[self.pos[0]][self.pos[1]] > 0:
+            return True
+    
+    def consume_food(self):
+        self.model.food_grid[self.pos[0]][self.pos[1]] -= 1
+        self.energy = min(Creature.E_RANGE[1], self.energy + Creature.E_RESTORE_RATE)
