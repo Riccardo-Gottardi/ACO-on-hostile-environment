@@ -1,6 +1,5 @@
 from mesa.model import Agent, Model
 
-
 class Creature(Agent):
     E_RANGE: tuple[int, int] = (0, 100)
     E_BASE_DRAIN_RATE: float = 0.1
@@ -76,6 +75,8 @@ class Creature(Agent):
     def is_food(self) -> bool:
         if self.model.food_grid[self.pos[0]][self.pos[1]] > 0:
             return True
+        else:
+            return False
     
     def consume_food(self):
         self.model.food_grid[self.pos[0]][self.pos[1]] -= 1
