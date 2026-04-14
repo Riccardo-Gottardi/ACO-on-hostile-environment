@@ -1,6 +1,8 @@
-from mesa.model import Agent, Model
+from mesa.discrete_space import CellAgent, Cell
+from mesa import Model
 
-class Creature(Agent):
+
+class Creature(CellAgent):
     E_RANGE: tuple[int, int] = (0, 100)
     E_BASE_DRAIN_RATE: float = 0.1
     E_MOVEMENT_DRAIN_RATE: float = 0.3
@@ -14,40 +16,34 @@ class Creature(Agent):
 
     MAX_STEP_SIZE: int = 3
 
-    def __init__(self, position: tuple[int, int], unique_id: int, model: Model):
+    def __init__(self, model: Model, cell: Cell):
         super().__init__(model)
-        
-        self.id = unique_id
+
+        self.cell = cell
+
         self.energy: float = Creature.E_RANGE[1]
         self.temperature: float = Creature.T_SAFE
 
     def step(self):
         if self.is_dead():
             return
-        
+
         if self.is_in_nest():
             self.cool_down()
         else:
             self.heat_up()
-            
-        if self.is_food():
-            self.consume_food()
-        
-        self.base_tirement()
 
+        if self.is_on_food():
+            self.consume_food()
+
+        self.base_tirement()
         self.move()
 
     def is_dead(self) -> bool:
-        if self.energy <= 0 or self.temperature >= Creature.T_CRIT:
-            return True
-        else:
-            return False
+        return self.energy <= 0 or self.temperature >= Creature.T_CRIT
 
     def is_in_nest(self) -> bool:
-        if self.pos == self.model.nest_position:
-            return True
-        else:
-            return False
+        return self.cell.coordinate == self.model.nest_position
 
     def cool_down(self):
         self.temperature = max(Creature.T_SAFE, self.temperature - Creature.T_COOL_RATE)
@@ -59,25 +55,23 @@ class Creature(Agent):
         self.energy -= Creature.E_BASE_DRAIN_RATE
 
     def move(self):
-        candidate_steps = self.model.grid.get_neighborhood(
-           self.pos, True, True, Creature.MAX_STEP_SIZE 
+        candidate_cells = list(
+            self.cell.get_neighborhood(radius=Creature.MAX_STEP_SIZE, include_center=True)
         )
 
-        new_position = self.random.choice(candidate_steps)
+        new_cell = self.random.choice(candidate_cells)
 
-        if self.pos != new_position:
+        if new_cell is not self.cell:
             self.movement_tirement()
-            self.model.grid.move_agent(self, new_position)
+            self.cell = new_cell
 
     def movement_tirement(self):
         self.energy -= Creature.E_MOVEMENT_DRAIN_RATE
 
-    def is_food(self) -> bool:
-        if self.model.food_grid[self.pos[0]][self.pos[1]] > 0:
-            return True
-        else:
-            return False
-    
+    def is_on_food(self) -> bool:
+        return self.model.food_grid[self.cell.coordinate] > 0
+
     def consume_food(self):
-        self.model.food_grid[self.pos[0]][self.pos[1]] -= 1
-        self.energy = min(Creature.E_RANGE[1], self.energy + Creature.E_RESTORE_RATE)
+        if self.is_on_food():
+            self.model.food_grid[self.cell.coordinate] -= 1
+            self.energy = min(Creature.E_RANGE[1], self.energy + Creature.E_RESTORE_RATE)
