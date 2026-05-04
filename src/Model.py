@@ -1,60 +1,146 @@
+from mesa import DataCollector, Model
 from mesa.discrete_space import OrthogonalMooreGrid
-from mesa import Model
-import numpy as np
-
+from Agent import CreatureAgent
+from CellAgent import EnvCell
 
 class Environment(Model):
-    def __init__(self, n_food_clusters: int = 12, food_area_percentage: float = 0.15, food_base_quantity: int = 10, pheromone_decay_rate: float = 0.05):
+    def __init__(self, width=60, height=60, num_agents=50, 
+                 n_food_clusters=12, food_area_percentage=0.15, 
+                 food_base_quantity=1, pheromone_decay_rate=0.02,
+                 safety_buffer_steps=2, foraging_start_threshold=0.9,
+                 pheromone_memory_weight=0.1,
+                 pheromone_base_drop=1.0, pheromone_follow_prob=0.7,
+                 rng=None): #RNG default for reproducibility
+        
         super().__init__()
-
-        self.grid = OrthogonalMooreGrid((60, 60), False, None, self.random)
-
-        self.nest_position = (
-            self.random.randint(0, self.grid.width - 1),
-            self.random.randint(0, self.grid.height - 1)
-        )
-
-        self.pheromone_grid = np.zeros((self.grid.width, self.grid.height))
+        
+        if rng is not None:
+            self.random = rng
+            
+        # Grid and Agent Setup
+        self.grid = OrthogonalMooreGrid([width, height], torus=False, capacity=100, random=self.random)
+        self.num_agents = num_agents
         self.pheromone_decay_rate = pheromone_decay_rate
+        self.safety_buffer_steps = safety_buffer_steps
+        self.foraging_start_threshold = foraging_start_threshold
+        self.pheromone_memory_weight = pheromone_memory_weight
+        self.pheromone_base_drop = pheromone_base_drop
+        self.pheromone_follow_prob = pheromone_follow_prob
+        self.nest_coords = (width // 2, height // 2)
+        
+        self.deaths_energy = 0
+        self.deaths_temperature = 0
+        self.deaths_foraging = 0
+        self.deaths_returning = 0
+        self.deaths_resting = 0
+        self.deaths_foraging_energy = 0
+        self.deaths_foraging_temperature = 0
+        self.deaths_returning_energy = 0
+        self.deaths_returning_temperature = 0
+        self.deaths_resting_energy = 0
+        self.deaths_resting_temperature = 0
 
-        self.food_grid = np.zeros((self.grid.width, self.grid.height))
-        self._generate_food_cluster(n_food_clusters, food_area_percentage, food_base_quantity)
+        for cell in self.grid:
+            cell_agent = EnvCell(self, len(self.agents), cell)
+            
+            if cell.coordinate == self.nest_coords:
+                cell_agent.is_nest = True
+            
+            self.agents.add(cell_agent)
 
-    def _generate_food_cluster(self, n_food_clusters: int, food_area_percentage: float, food_base_quantity: int):
-        total_cells = self.grid.width * self.grid.height
-        target_food_cells = total_cells * food_area_percentage
+        # Foood distribution in clusters
+        total_cells = width * height
+        target_food_cells = int(total_cells * food_area_percentage)
+        cells_per_cluster = max(1, target_food_cells // n_food_clusters)
+        nest_food_free_radius = 1
+        
+        for _ in range(n_food_clusters):
+            valid_start = False
 
-        # Place the central cells of the food clusters
-        food_cells_positions = []
-        while len(food_cells_positions) < n_food_clusters:
-            x = self.random.randint(0, self.grid.width - 1)
-            y = self.random.randint(0, self.grid.height - 1)
+            while not valid_start:
+                cx = self.random.randint(0, width - 1)
+                cy = self.random.randint(0, height - 1)
+                dist_to_nest = max(abs(cx - self.nest_coords[0]), abs(cy - self.nest_coords[1]))
+                
+                if dist_to_nest > nest_food_free_radius:
+                    valid_start = True
+                    
+            current_cell = self.grid[cx, cy]
+            unique_cells_placed = 0 
+            
+            while unique_cells_placed < cells_per_cluster:
+                env_agent = self._get_env_cell(current_cell)
+                curr_x, curr_y = current_cell.coordinate
+                dist = max(abs(curr_x - self.nest_coords[0]), abs(curr_y - self.nest_coords[1]))
+                
+                if env_agent and dist > nest_food_free_radius:
+    
+                    if env_agent.food_quantity == 0:
+                        unique_cells_placed += 1
 
-            if (x, y) != self.nest_position and self.food_grid[(x, y)] == 0:
-                self.food_grid[(x, y)] = food_base_quantity
-                food_cells_positions.append((x, y))
+                    env_agent.food_quantity += food_base_quantity
+                
+                neighbors = current_cell.get_neighborhood(radius=1, include_center=False)
+                
+                if len(neighbors) > 0:
+                    current_cell = neighbors.select_random_cell()
 
-        # Add the neighbourhood cells for the food clusters
-        while len(food_cells_positions) < target_food_cells:
-            (x, y) = self.random.choice(food_cells_positions)
-
-            neighbor_cell = self.random.choice(
-                list(self.grid[(x, y)].get_neighborhood(radius=1, include_center=False))
+        # Closest food cell distance from the nest tracker
+        food_cells = [c for c in self.agents_by_type.get(EnvCell, []) if c.food_quantity > 0]
+        if food_cells:
+            self.nearest_food_distance = min(
+                max(abs(cell.cell.coordinate[0] - self.nest_coords[0]), abs(cell.cell.coordinate[1] - self.nest_coords[1]))
+                for cell in food_cells
             )
-            # Since we don't care anymore of the first (x, y) we overwrite them
-            (x, y) = neighbor_cell.coordinate
+        else:
+            self.nearest_food_distance = None
 
-            if (x, y) != self.nest_position and self.food_grid[(x, y)] == 0:
-                self.food_grid[(x, y)] = food_base_quantity
-                food_cells_positions.append((x, y))
+        # Initialize Agents at the nest
+        nest_cell = self.grid[self.nest_coords[0], self.nest_coords[1]]
+        for _ in range(self.num_agents):
+            agent = CreatureAgent(self, len(self.agents), nest_cell)
+            self.agents.add(agent)
+
+        self.initial_food = sum(c.food_quantity for c in self.agents_by_type.get(EnvCell, []))
+
+        # Data Collector
+        self.datacollector = DataCollector(
+            model_reporters={
+                "Foraging": lambda m: sum(1 for a in m.agents_by_type.get(CreatureAgent, []) if a.state == "FORAGING"),
+                "Returning": lambda m: sum(1 for a in m.agents_by_type.get(CreatureAgent, []) if a.state == "RETURNING"),
+                "Resting": lambda m: sum(1 for a in m.agents_by_type.get(CreatureAgent, []) if a.state == "RESTING"),
+                "Alive": lambda m: len(m.agents_by_type.get(CreatureAgent, [])),
+                "Dead (Energy)": lambda m: m.deaths_energy,
+                "Dead (Temperature)": lambda m: m.deaths_temperature,
+                "Deaths Foraging (Energy)": lambda m: m.deaths_foraging_energy,
+                "Deaths Foraging (Temperature)": lambda m: m.deaths_foraging_temperature,
+                "Deaths Returning (Energy)": lambda m: m.deaths_returning_energy,
+                "Deaths Returning (Temperature)": lambda m: m.deaths_returning_temperature,
+                "Deaths Resting (Energy)": lambda m: m.deaths_resting_energy,
+                "Deaths Resting (Temperature)": lambda m: m.deaths_resting_temperature,
+                "Remaining Food (%)": lambda m: (sum(c.food_quantity for c in m.agents_by_type.get(EnvCell, [])) / max(1, m.initial_food)) * 100
+            }
+        )
+        self.datacollector.collect(self)
+        self.running = True
+
+    def _get_env_cell(self, target_cell):
+        for obj in target_cell.agents:
+            if isinstance(obj, EnvCell):
+                return obj
+        return None
 
     def step(self):
-        # Update the pheromone traces
-        self.pheromone_grid *= (1 - self.pheromone_decay_rate)
+        # Move creatures
+        if CreatureAgent in self.agents_by_type:
+            self.agents_by_type[CreatureAgent].shuffle().do('step')
+            
+        # Evaporate pheromones on cells
+        if EnvCell in self.agents_by_type:
+            self.agents_by_type[EnvCell].shuffle().do('step')
+            
+        self.datacollector.collect(self)
 
-        # Update the agents in random order, to avoid agents order bias
-        self.agents.shuffle_do("step")
-
-        dead_creatures = [c for c in self.agents if c.is_dead()]
-        for creature in dead_creatures:
-            creature.remove()
+        # End simulation if all agents are dead
+        if len(self.agents_by_type.get(CreatureAgent, [])) == 0:
+            self.running = False

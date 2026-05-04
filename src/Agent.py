@@ -1,206 +1,213 @@
-from enum import Enum
-from mesa.discrete_space import CellAgent, Cell
-from mesa import Model
-import math
+import numpy as np
+from mesa.discrete_space import CellAgent
+from CellAgent import EnvCell
 
-class State(Enum):
-    FORAGING = "foraging"
-    RETURNING = "returning"
-    RESTING = "resting"
-
-class Creature(CellAgent):
-    E_RANGE: tuple[int, int] = (0, 100)
-    E_BASE_DRAIN_RATE: float = 0.1
-    E_MOVEMENT_DRAIN_RATE: float = 0.3
-    E_RESTORE_RATE: float = E_BASE_DRAIN_RATE
-    E_THRESHOLD: float = 50.0
-
-    T_RANGE: tuple[int, int] = (-10, 100)
-    T_SAFE: int = 20
-    T_CRIT: int = 55
-    T_RISE_RATE: float = 0.5
-    T_COOL_RATE: float = T_RISE_RATE
-
-    MAX_STEP_SIZE: int = 3
-    RISK_FACTOR: float = 0.3
-
-    def __init__(self, model: Model, cell: Cell):
+class CreatureAgent(CellAgent):
+    def __init__(self, model, unique_id, cell):
         super().__init__(model)
-
+        self.unique_id = unique_id
         self.cell = cell
+        
+        # State Variables
+        self.state = "FORAGING"
+        self.E_max = 1000.0          # Max energy 
+        self.energy = self.E_max     # E_i(t) bounded by [0, E_max]
+        self.temperature = 30.0      # T_i(t) start at safe nest temp
+        
+        # Physiology / Cost Constants
+        self.T_safe = 30.0           # Nest temperature (approx. 30°C underground)
+        self.T_crit = 53.0           # Critical thermal max (Saharan ant limit is ~53°C)
+        self.cost_E_move = 2.0       # Energy cost per step moving
+        self.cost_E_rest = 1.0       # Energy cost while resting/basal metabolism
+        self.cost_T_env = 0.05       # Base Temp increase per minute (step) outside
+        self.cost_T_move = 0.05      # Extra Temp increase per minute when moving
+        self.cool_rate = 2.0         # Temp decrease per minute in nest
+        self.max_speed = 2
+        self.food_energy_gain = 750.0  # Energy gained per food item consumed
+        
+        # Memory
+        self.food_richness_memory = 0.0
+        self.has_food = False
 
-        self.energy: float = Creature.E_RANGE[1]
-        self.temperature: float = Creature.T_SAFE
+    def _get_env_cell(self, target_cell):
+        """Helper to extract the EnvCell object from a grid coordinate."""
+        for obj in target_cell.agents:
+            if isinstance(obj, EnvCell):
+                return obj
+        return None
 
-        self.state = State.FORAGING
+    def _chebyshev_distance(self, coord1, coord2):
+        return max(abs(coord1[0] - coord2[0]), abs(coord1[1] - coord2[1]))
 
-    def step(self):
-        if self.is_dead():
-            return
+    def is_dead(self):
+        return self.energy <= 0 or self.temperature >= self.T_crit
 
-        # Creature action on Environment
-        match self.state:
-            case State.FORAGING:
-                self.move()
-                if self.is_on_food():
-                    self.consume_food()
-                if self.is_in_danger():
-                    if self.can_return_home():
-                        self.state = State.RETURNING
-
-            case State.RETURNING:
-                self.move()
-                if self.is_in_nest():
-                    self.state = State.RESTING
-                    
-            case State.RESTING:
-                if self.is_in_danger():
-                    self.state = State.FORAGING
-    
-        # Environment action on Creature
-        match self.state:
-            case State.FORAGING:
-                self.heat_up()
-            
-            case State.RETURNING:
-                self.heat_up()
-
-            case State.RESTING:
-                self.cool_down()
-
-        self.base_tirement()
-
-    def is_dead(self) -> bool:
-        return self.energy <= 0 or self.temperature >= Creature.T_CRIT
-
-    def is_in_nest(self) -> bool:
-        return self.cell.coordinate == self.model.nest_position # pyright: ignore[reportOptionalMemberAccess]
-
-    def cool_down(self):
-        self.temperature = max(Creature.T_SAFE, self.temperature - Creature.T_COOL_RATE)
-
-    def heat_up(self):
-        self.temperature += Creature.T_RISE_RATE
+    def is_in_nest(self):
+        return self.cell.coordinate == self.model.nest_coords
 
     def base_tirement(self):
-        self.energy -= Creature.E_BASE_DRAIN_RATE
+        self.energy -= self.cost_E_rest
+
+    def movement_tirement(self):
+        self.energy -= self.cost_E_move
+        self.temperature += self.cost_T_move
+
+    def cool_down(self):
+        self.temperature = max(self.T_safe, self.temperature - self.cool_rate)
+
+    def should_return_home(self):
+        """Calculates if the agent is in danger of dying before reaching the nest."""
+        dist_to_nest = self._chebyshev_distance(self.cell.coordinate, self.model.nest_coords)
+        
+        # 1. Calculate TRUE costs per step (movement + basal metabolism/environment)
+        total_energy_per_step = self.cost_E_move + self.cost_E_rest
+        total_heat_per_step = self.cost_T_move + self.cost_T_env
+        
+        # 2. Add a flat safety buffer
+        safe_distance = dist_to_nest + self.model.safety_buffer_steps
+        
+        # 3. Heat danger: Will my temp exceed T_crit before I get back?
+        estimated_max_temp = self.temperature + (safe_distance * total_heat_per_step)
+        heat_danger = estimated_max_temp >= self.T_crit
+        
+        # 4. Energy danger: Will I run out of energy before I get back?
+        required_energy = safe_distance * total_energy_per_step
+        energy_danger = self.energy <= required_energy
+        
+        # 5. If in ANY danger, go home immediately. No gambling.
+        return heat_danger or energy_danger
+
+    def should_start_foraging(self):
+        """Determines if a resting agent is ready to leave the nest."""
+        if self.temperature <= self.T_safe:
+            if self.energy < (self.E_max * self.model.foraging_start_threshold):
+                return True
+        return False
+
+    def is_in_danger(self):
+        """Wrapper method routing to specific state-based checks."""
+        if self.state == "FORAGING":
+            return self.should_return_home()
+        elif self.state == "RESTING":
+            return self.should_start_foraging()
+        return False
+
+    def can_return_home(self):
+        return True 
+
+    def is_on_food(self):
+        neighbors = self.cell.get_neighborhood(radius=1, include_center=True)
+        return any(self._get_env_cell(c).food_quantity > 0 for c in neighbors)
+
+    def consume_food(self):
+        neighbors = self.cell.get_neighborhood(radius=1, include_center=True)
+        food_cells = [c for c in neighbors if self._get_env_cell(c).food_quantity > 0]
+        if food_cells:
+            target_cell = self.model.random.choice(food_cells)
+            self.cell = target_cell
+            env_cell = self._get_env_cell(self.cell)
+            
+            env_cell.food_quantity -= 1
+            self.energy = min(self.E_max, self.energy + self.food_energy_gain)
+            self.has_food = True
+            self.food_richness_memory = env_cell.food_quantity
+
+    def drop_pheromone(self):
+        if self.has_food:
+            env_cell = self._get_env_cell(self.cell)
+            env_cell.pheromone_level += (self.food_richness_memory * self.model.pheromone_memory_weight) + self.model.pheromone_base_drop
 
     def move(self):
         match self.state:
-            case State.FORAGING:
+            case "FORAGING":
+                self.movement_tirement()
                 self.move_logic_foraging()
-            case State.RETURNING:
+            case "RETURNING":
+                self.movement_tirement()
                 self.move_logic_returning()
 
     def move_logic_foraging(self):
-        neighbors_r1 = self.cell.get_neighborhood(radius=1, include_center=False)
-        food_cells = [c for c in neighbors_r1 if self.model.food_grid[c.coordinate] > 0]
-        food_cells.sort(key=lambda c: self.model.food_grid[c.coordinate], reverse=True)
-
-        if food_cells:
-            self.move_to(food_cells[0])
+        if self.is_on_food():
+            pass # Consumption handled directly
         else:
-            # TODO: Remove random step and move toward higher pheromone concentration also do something about radius 2
-            candidate_cells = self.cell.get_neighborhood(radius=2, include_center=True)
-            self.move_to(self.random.choice(candidate_cells))
+            neighbors = self.cell.get_neighborhood(radius=1, include_center=True)
+            if self.model.random.random() < self.model.pheromone_follow_prob:
+                best_cell = max(neighbors, key=lambda c: self._get_env_cell(c).pheromone_level)
+                if self._get_env_cell(best_cell).pheromone_level > 0:
+                    dx = best_cell.coordinate[0] - self.cell.coordinate[0]
+                    dy = best_cell.coordinate[1] - self.cell.coordinate[1]
+                    
+                    tx = max(0, min(self.model.grid.width - 1, self.cell.coordinate[0] + dx * 2))
+                    ty = max(0, min(self.model.grid.height - 1, self.cell.coordinate[1] + dy * 2))
+                    
+                    self.cell = self.model.grid[tx, ty]
+                else:
+                    self.cell = neighbors.select_random_cell()
+            else:
+                step_size = self.model.random.randint(1, self.max_speed)
+                exploratory_neighbors = self.cell.get_neighborhood(radius=step_size, include_center=False)
+                self.cell = exploratory_neighbors.select_random_cell()
 
     def move_logic_returning(self):
-        distance_to_nest = self.distance_from_nest()
-        (nx, ny) = self.model.nest_position
-        (cx, cy) = self.cell.coordinate
-        distance_vector = (nx - cx, ny - cy)
-        norm_distance_vector = (distance_vector[0] / distance_to_nest, distance_vector[1] / distance_to_nest)
-
-        step_size = min(Creature.MAX_STEP_SIZE, distance_to_nest)
-
-        next_cell = (math.ceil(cx + norm_distance_vector[0] * step_size), math.ceil(cy + norm_distance_vector[1] * step_size))
-
-        self.move_to(next_cell)
-    
-
-    def move_to(self, new_cell: Cell):
-        if new_cell is not self.cell:
-            self.movement_tirement()
-            self.cell = new_cell
-
-    def movement_tirement(self):
-        self.energy -= Creature.E_MOVEMENT_DRAIN_RATE
-
-    def is_on_food(self) -> bool:
-        if self.cell is not None:
-            return self.model.food_grid[self.cell.coordinate] > 0
-        else:
-            return False
-
-    def consume_food(self):
-        if self.is_on_food():
-            self.model.food_grid[self.cell.coordinate] -= 1  # pyright: ignore[reportOptionalMemberAccess]
-            self.energy = min(Creature.E_RANGE[1], self.energy + Creature.E_RESTORE_RATE)
-    
-    def is_in_danger(self) -> bool:
-        if self.state == State.FORAGING:
-            return self.is_in_foraging_danger()
-        elif self.state == State.RESTING:
-            return not self.is_in_resting_danger()
-        else:
-            return False
-
-    def is_in_foraging_danger(self):
-        candidates_next_cell = list(
-            self.cell.get_neighborhood(radius=Creature.MAX_STEP_SIZE, include_center=True) # pyright: ignore[reportOptionalMemberAccess]
-        )
-
-        number_of_dangerous_cells = 0
-        for cell in candidates_next_cell:
-            pos = cell.coordinate
-            if not self.can_return_home((pos[0], pos[1])):
-                number_of_dangerous_cells += 1
+        if self.is_in_nest():
+            return
         
-        danger = number_of_dangerous_cells / len(candidates_next_cell)
-        return danger > Creature.RISK_FACTOR
-
-    def is_in_resting_danger(self) -> bool:
-        thermal_gain_per_step = Creature.T_COOL_RATE / Creature.T_RISE_RATE
-        energy_loss_ratio = Creature.E_BASE_DRAIN_RATE / (Creature.E_BASE_DRAIN_RATE + Creature.E_MOVEMENT_DRAIN_RATE)
+        self.drop_pheromone()
         
-        # Dynamic Scarcity Factor (The "Greed" Variable)
-        # If the creature recently found a rich food cluster, 
-        # it can afford to rest longer. If food is scarce, it must leave sooner.
-        # richness_estimate should be a value from 0.0 to 1.0
-        scarcity_buffer = getattr(self, 'richness_estimate', 0.5) 
+        neighbors = self.cell.get_neighborhood(radius=1, include_center=False)
+        best_cell = min(neighbors, key=lambda c: self._chebyshev_distance(c.coordinate, self.model.nest_coords))
+        self.cell = best_cell
 
-        worth_it = (thermal_gain_per_step * scarcity_buffer) > energy_loss_ratio
+    def step(self):
+        if self.is_dead():
+            if self.state == "FORAGING":
+                self.model.deaths_foraging += 1
+                if self.energy <= 0:
+                    self.model.deaths_foraging_energy += 1
+                else:
+                    self.model.deaths_foraging_temperature += 1
+            elif self.state == "RETURNING":
+                self.model.deaths_returning += 1
+                if self.energy <= 0:
+                    self.model.deaths_returning_energy += 1
+                else:
+                    self.model.deaths_returning_temperature += 1
+            elif self.state == "RESTING":
+                self.model.deaths_resting += 1
+                if self.energy <= 0:
+                    self.model.deaths_resting_energy += 1
+                else:
+                    self.model.deaths_resting_temperature += 1
 
-        # Immediate Death Overrides 
-        # Never leave if the next step results in T >= T_crit
-        if self.temperature + Creature.T_RISE_RATE >= Creature.T_CRIT:
-            return True 
-        
-        if self.temperature <= Creature.T_SAFE:
-            return False
+            if self.energy <= 0:
+                self.model.deaths_energy += 1
+            else:
+                self.model.deaths_temperature += 1
+            self.remove()
+            return
+            
+        self.energy -= self.cost_E_rest
+        if not self.is_in_nest():
+            self.temperature += self.cost_T_env
+            
+        match self.state:
+            case "FORAGING":
+                if self.is_on_food():
+                    self.consume_food()
+                    self.state = "RETURNING"
+                elif self.is_in_danger():
+                    self.state = "RETURNING"
+                else:
+                    self.move()
 
-        return worth_it
-
-    def can_return_home(self, pos: tuple[int, int] | None = None) -> bool:
-        distance_from_home = self.distance_from_nest(pos)
-
-        # TODO: whoud we use the following formula instead?
-        # steps_to_go_home = math.ceil(distance_from_home / Creature.MAX_STEP_SIZE)
-        # TODO: FIX the following formula to consider dynamically steps maximum size
-        step_to_go_home3 = distance_from_home // 3
-        step_to_go_home2 = (distance_from_home % 3) // 2
-        step_to_go_home1 = distance_from_home - step_to_go_home3 * 3 - step_to_go_home2 * 2
-        step_to_go_home = step_to_go_home3 + step_to_go_home2 + step_to_go_home1
-        
-        temperature_rise_going_home = step_to_go_home * Creature.T_RISE_RATE
-        energy_decrease_going_home = step_to_go_home * (Creature.E_BASE_DRAIN_RATE + Creature.E_MOVEMENT_DRAIN_RATE)
-        return (self.temperature + temperature_rise_going_home < Creature.T_CRIT and 
-                self.energy - energy_decrease_going_home > Creature.E_RANGE[0])
-
-    def distance_from_nest(self, pos: tuple[int, int] | None = None) -> int:
-        (nx, ny) = self.model.nest_position
-        if pos is None:
-            (cx, cy) = self.cell.coordinate
-        else:
-            (cx, cy) = pos
-        return math.sqrt(math.pow(nx - cx, 2) + math.pow(ny - cy, 2))
+            case "RETURNING":
+                if self.is_in_nest():
+                    self.state = "RESTING"
+                    self.has_food = False
+                else:
+                    self.move()
+                    
+            case "RESTING":
+                self.cool_down()
+                if self.is_in_danger():
+                    self.state = "FORAGING"
