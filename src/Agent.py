@@ -1,6 +1,4 @@
-import numpy as np
 from mesa.discrete_space import CellAgent
-from CellAgent import EnvCell
 
 class CreatureAgent(CellAgent):
     def __init__(self, model, unique_id, cell):
@@ -13,6 +11,8 @@ class CreatureAgent(CellAgent):
         self.E_max = 1000.0          # Max energy 
         self.energy = self.E_max     # E_i(t) bounded by [0, E_max]
         self.temperature = 30.0      # T_i(t) start at safe nest temp
+        self.age_steps = 0
+        self.lifetime_food_collected = 0
         
         # Physiology / Cost Constants
         self.T_safe = 30.0           # Nest temperature (approx. 30°C underground)
@@ -29,13 +29,6 @@ class CreatureAgent(CellAgent):
         self.food_richness_memory = 0.0
         self.has_food = False
 
-    def _get_env_cell(self, target_cell):
-        """Helper to extract the EnvCell object from a grid coordinate."""
-        for obj in target_cell.agents:
-            if isinstance(obj, EnvCell):
-                return obj
-        return None
-
     def _chebyshev_distance(self, coord1, coord2):
         return max(abs(coord1[0] - coord2[0]), abs(coord1[1] - coord2[1]))
 
@@ -49,7 +42,7 @@ class CreatureAgent(CellAgent):
         self.energy -= self.cost_E_rest
 
     def movement_tirement(self):
-        self.energy -= self.cost_E_move
+        self.energy -= max(0.0, self.cost_E_move - self.cost_E_rest)
         self.temperature += self.cost_T_move
 
     def cool_down(self):
@@ -84,38 +77,33 @@ class CreatureAgent(CellAgent):
                 return True
         return False
 
-    def is_in_danger(self):
-        """Wrapper method routing to specific state-based checks."""
-        if self.state == "FORAGING":
-            return self.should_return_home()
-        elif self.state == "RESTING":
-            return self.should_start_foraging()
-        return False
-
     def can_return_home(self):
         return True 
 
     def is_on_food(self):
         neighbors = self.cell.get_neighborhood(radius=1, include_center=True)
-        return any(self._get_env_cell(c).food_quantity > 0 for c in neighbors)
+        food_layer = self.model.food_layer.data
+        return any(food_layer[c.coordinate] > 0 for c in neighbors)
 
     def consume_food(self):
         neighbors = self.cell.get_neighborhood(radius=1, include_center=True)
-        food_cells = [c for c in neighbors if self._get_env_cell(c).food_quantity > 0]
+        food_layer = self.model.food_layer.data
+        food_cells = [c for c in neighbors if food_layer[c.coordinate] > 0]
         if food_cells:
             target_cell = self.model.random.choice(food_cells)
             self.cell = target_cell
-            env_cell = self._get_env_cell(self.cell)
-            
-            env_cell.food_quantity -= 1
+            curr_x, curr_y = self.cell.coordinate
+            food_layer[curr_x, curr_y] = max(0.0, food_layer[curr_x, curr_y] - 1.0)
             self.energy = min(self.E_max, self.energy + self.food_energy_gain)
             self.has_food = True
-            self.food_richness_memory = env_cell.food_quantity
+            self.food_richness_memory = food_layer[curr_x, curr_y]
+            self.lifetime_food_collected += 1
 
     def drop_pheromone(self):
         if self.has_food:
-            env_cell = self._get_env_cell(self.cell)
-            env_cell.pheromone_level += (self.food_richness_memory * self.model.pheromone_memory_weight) + self.model.pheromone_base_drop
+            pheromone_layer = self.model.pheromone_layer.data
+            curr_x, curr_y = self.cell.coordinate
+            pheromone_layer[curr_x, curr_y] += (self.food_richness_memory * self.model.pheromone_memory_weight) + self.model.pheromone_base_drop
 
     def move(self):
         match self.state:
@@ -128,18 +116,19 @@ class CreatureAgent(CellAgent):
 
     def move_logic_foraging(self):
         if self.is_on_food():
-            pass # Consumption handled directly
+            pass
         else:
             neighbors = self.cell.get_neighborhood(radius=1, include_center=True)
+            pheromone_layer = self.model.pheromone_layer.data
             if self.model.random.random() < self.model.pheromone_follow_prob:
-                best_cell = max(neighbors, key=lambda c: self._get_env_cell(c).pheromone_level)
-                if self._get_env_cell(best_cell).pheromone_level > 0:
+                best_cell = max(neighbors, key=lambda c: pheromone_layer[c.coordinate])
+                if pheromone_layer[best_cell.coordinate] > 0:
                     dx = best_cell.coordinate[0] - self.cell.coordinate[0]
                     dy = best_cell.coordinate[1] - self.cell.coordinate[1]
-                    
+
                     tx = max(0, min(self.model.grid.width - 1, self.cell.coordinate[0] + dx * 2))
                     ty = max(0, min(self.model.grid.height - 1, self.cell.coordinate[1] + dy * 2))
-                    
+
                     self.cell = self.model.grid[tx, ty]
                 else:
                     self.cell = neighbors.select_random_cell()
@@ -183,6 +172,8 @@ class CreatureAgent(CellAgent):
                 self.model.deaths_energy += 1
             else:
                 self.model.deaths_temperature += 1
+
+            self.model.completed_agent_food_collections.append(self.lifetime_food_collected)
             self.remove()
             return
             
@@ -195,7 +186,7 @@ class CreatureAgent(CellAgent):
                 if self.is_on_food():
                     self.consume_food()
                     self.state = "RETURNING"
-                elif self.is_in_danger():
+                elif self.should_return_home():
                     self.state = "RETURNING"
                 else:
                     self.move()
@@ -206,8 +197,10 @@ class CreatureAgent(CellAgent):
                     self.has_food = False
                 else:
                     self.move()
-                    
+
             case "RESTING":
                 self.cool_down()
-                if self.is_in_danger():
+                if self.should_start_foraging():
                     self.state = "FORAGING"
+
+        self.age_steps += 1
