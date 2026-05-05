@@ -1,16 +1,28 @@
-import optuna
-import pandas as pd
+"""
+Optuna proposes parameter sets; mesa.batch_run evaluates each set across a
+fixed list of seeds. The winning configuration is replayed at higher fidelity
+for inspection.
+"""
+
+import math
 import os
 import warnings
-from multiprocessing import freeze_support
-import random
-import math
+
+import mesa
+import optuna
+import pandas as pd
+
 from Model import Environment
 
 warnings.simplefilter("ignore", category=FutureWarning)
-experiment_name = "swarm_foraging_experiment"
 
-MODEL_DEFAULTS = {
+EXPERIMENT_NAME = "swarm_foraging_experiment"
+EVALUATION_RUNS = 10           # seeds swept per Optuna trial
+FINAL_CONFIRMATION_RUNS = 5    # seeds for the final, high-fidelity batch
+TRIAL_MAX_STEPS = 43_200
+FINAL_MAX_STEPS = 129_600
+
+FIXED_PARAMS = {
     "width": 60,
     "height": 60,
     "n_food_clusters": 12,
@@ -18,239 +30,128 @@ MODEL_DEFAULTS = {
     "food_base_quantity": 10,
 }
 
-EVALUATION_RUNS = 10
-FINAL_CONFIRMATION_RUNS = 5
 
-def _build_rng(seed):
-    return random.Random(seed) if seed is not None else None
+# ---------- Scoring -------------------------------------------------------
 
-def _normalize_dataframe_index(frame, step_column="Step", agent_column="AgentID"):
-    if frame.empty:
-        return frame.copy()
+def _score_row(row):
+    """Map one batch_run result row into an Optimization Score in [0, 1]."""
+    survival = max(0.0, min(1.0, row["Survival Ratio"]))
+    food = max(0.0, min(1.0, row["Food Collection Ratio"]))
+    retrieval = 1.0 - math.exp(-max(0.0, row["Resource Retrieval Rate"]))
 
-    normalized = frame.copy().reset_index()
-    rename_map = {}
+    if row["Thermal Efficiency"] > 0:
+        thermal = row["Thermal Efficiency"] / (1.0 + row["Thermal Efficiency"]) 
+    else:
+        thermal = 0.0
 
-    if step_column not in normalized.columns:
-        if "index" in normalized.columns:
-            rename_map["index"] = step_column
-        elif "level_0" in normalized.columns:
-            rename_map["level_0"] = step_column
-
-    if agent_column not in normalized.columns:
-        if "level_1" in normalized.columns:
-            rename_map["level_1"] = agent_column
-
-    if rename_map:
-        normalized = normalized.rename(columns=rename_map)
-
-    if step_column in normalized.columns:
-        normalized[step_column] = normalized[step_column].astype(int)
-
-    return normalized
-
-def _safe_float(value, fallback):
-    if pd.isna(value):
-        return float(fallback)
-    return float(value)
-
-def _simulation_score(summary):
-    survival_component = max(0.0, min(1.0, summary["Survival Ratio"]))
-    food_component = max(0.0, min(1.0, summary["Food Collection Ratio"]))
-    retrieval_component = 1.0 - math.exp(-max(0.0, summary["Resource Retrieval Rate"]))
-    thermal_component = summary["Thermal Efficiency"] / (1.0 + summary["Thermal Efficiency"]) if summary["Thermal Efficiency"] > 0 else 0.0
-    fairness_component = max(0.0, min(1.0, 1.0 - summary["Load Gini"]))
-
+    fairness = max(0.0, min(1.0, 1.0 - row["Load Gini"]))
+    
     return (
-        0.30 * survival_component
-        + 0.20 * food_component
-        + 0.20 * retrieval_component
-        + 0.20 * thermal_component
-        + 0.10 * fairness_component
+        0.30 * survival
+        + 0.20 * food
+        + 0.20 * retrieval
+        + 0.20 * thermal
+        + 0.10 * fairness
     )
 
-def _run_single_simulation(parameters, max_steps, seed):
-    model = Environment(**parameters, rng=_build_rng(seed))
 
-    while model.running and model.steps_elapsed < max_steps:
-        model.step()
+def _add_derived_metrics(df, max_steps):
+    """Append the two ratios the model doesn't report on its own."""
+    if df.empty:
+        return df
 
-    model_df = _normalize_dataframe_index(model.datacollector.get_model_vars_dataframe(), step_column="Step")
-    agent_df = _normalize_dataframe_index(model.datacollector.get_agent_vars_dataframe(), step_column="Step", agent_column="AgentID")
+    df = df.copy()
+    df["Survival Ratio"] = df["Step"] / max_steps
+    food_total = df["Total Food Collected"] + df["Remaining Food (Units)"]
+    df["Food Collection Ratio"] = df["Total Food Collected"] / food_total.clip(lower=1.0)
+    df["Optimization Score"] = df.apply(_score_row, axis=1)
 
-    return model, model_df, agent_df
+    return df
 
-def _summarize_run(model, model_df, parameters, run_id, seed, max_steps):
-    final_row = model_df.iloc[-1] if not model_df.empty else pd.Series(dtype=float)
 
-    completed_steps = int(_safe_float(final_row.get("Step", model.steps_elapsed), model.steps_elapsed))
-    total_food_collected = _safe_float(final_row.get("Total Food Collected", model.total_food_collected), model.total_food_collected)
-    remaining_food_units = _safe_float(final_row.get("Remaining Food (Units)", model.get_remaining_food_units()), model.get_remaining_food_units())
-    resource_retrieval_rate = _safe_float(final_row.get("Resource Retrieval Rate", model.calculate_resource_retrieval_rate()), model.calculate_resource_retrieval_rate())
-    thermal_efficiency = _safe_float(final_row.get("Thermal Efficiency", model.calculate_thermal_efficiency()), model.calculate_thermal_efficiency())
-    load_gini = _safe_float(final_row.get("Load Gini", model.calculate_load_gini()), model.calculate_load_gini())
-    cumulative_thermal_load = _safe_float(final_row.get("Cumulative Thermal Load", model.cumulative_thermal_load), model.cumulative_thermal_load)
-    shannon_entropy = _safe_float(final_row.get("Shannon Entropy", model.calculate_spatial_entropy()), model.calculate_spatial_entropy())
-    mean_agent_energy = _safe_float(final_row.get("Mean Agent Energy", model.calculate_mean_agent_energy()), model.calculate_mean_agent_energy())
-    mean_agent_temperature = _safe_float(final_row.get("Mean Agent Temperature", model.calculate_mean_agent_temperature()), model.calculate_mean_agent_temperature())
-    mean_distance_to_nest = _safe_float(final_row.get("Mean Distance to Nest", model.calculate_mean_distance_to_nest()), model.calculate_mean_distance_to_nest())
-    mean_lifetime_food_collected = _safe_float(final_row.get("Mean Lifetime Food Collected", model.calculate_mean_lifetime_food_collected()), model.calculate_mean_lifetime_food_collected())
+# ---------- Core: run a sweep over seeds ---------------------------------
 
-    summary = {
-        "RunId": run_id,
-        "Seed": seed,
-        "Completed Steps": completed_steps,
-        "Survival Ratio": completed_steps / max(1, max_steps),
-        "Total Food Collected": total_food_collected,
-        "Food Collection Ratio": total_food_collected / max(1, model.initial_food),
-        "Remaining Food (Units)": remaining_food_units,
-        "Remaining Food (%)": _safe_float(final_row.get("Remaining Food (%)", 0.0), 0.0),
-        "Resource Retrieval Rate": resource_retrieval_rate,
-        "Thermal Efficiency": thermal_efficiency,
-        "Load Gini": load_gini,
-        "Fairness Score": max(0.0, min(1.0, 1.0 - load_gini)),
-        "Cumulative Thermal Load": cumulative_thermal_load,
-        "Shannon Entropy": shannon_entropy,
-        "Mean Agent Energy": mean_agent_energy,
-        "Mean Agent Temperature": mean_agent_temperature,
-        "Mean Distance to Nest": mean_distance_to_nest,
-        "Mean Lifetime Food Collected": mean_lifetime_food_collected,
-    }
+def _run_seeds(parameters, seeds, max_steps, *, per_step=False):
+    """Sweep `seeds` for one configuration via mesa.batch_run.
 
-    summary["Optimization Score"] = _simulation_score(summary)
-    for key, value in parameters.items():
-        summary[key] = value
+    per_step=False  → one row per run (final step). Use for trial scoring.
+    per_step=True   → one row per (run, step). Use for plotting traces.
+    """
+    sweep_params = {**parameters, "seed": list(seeds)}
+    results = mesa.batch_run(
+        Environment,
+        parameters=sweep_params,
+        iterations=1,
+        max_steps=max_steps,
+        data_collection_period=1 if per_step else -1,
+        number_processes=1,            # parallelize at the trial level instead
+        display_progress=False,
+    )
 
-    return summary
+    return pd.DataFrame(results)
 
-def _attach_metadata(frame, metadata):
-    if frame.empty:
-        return frame.copy()
 
-    enriched = frame.copy()
-    for key, value in metadata.items():
-        enriched[key] = value
-
-    return enriched
-
-def _simulate_runs(parameters, runs, max_steps, seed_start=0, show_progress=False):
-    model_frames = []
-    agent_frames = []
-    summary_rows = []
-
-    for run_id in range(runs):
-        seed = seed_start + run_id
-        model, model_df, agent_df = _run_single_simulation(parameters, max_steps=max_steps, seed=seed)
-        summary = _summarize_run(model, model_df, parameters, run_id, seed, max_steps)
-
-        run_metadata = {"RunId": run_id, "Seed": seed, **parameters}
-        summary_metadata = {**run_metadata, **{key: value for key, value in summary.items() if key not in run_metadata}}
-
-        model_frames.append(_attach_metadata(model_df, summary_metadata))
-        if not agent_df.empty:
-            agent_frames.append(_attach_metadata(agent_df, run_metadata))
-        summary_rows.append(summary)
-
-        if show_progress:
-            print(f"Completed simulation run {run_id + 1}/{runs} (seed={seed})")
-
-    final_df = pd.concat(model_frames, ignore_index=True) if model_frames else pd.DataFrame()
-    agent_df = pd.concat(agent_frames, ignore_index=True) if agent_frames else pd.DataFrame()
-    summary_df = pd.DataFrame(summary_rows)
-
-    if not final_df.empty and {"RunId", "Step"}.issubset(final_df.columns):
-        final_df = final_df.sort_values(["RunId", "Step"]).reset_index(drop=True)
-
-    if not agent_df.empty and {"RunId", "Step", "AgentID"}.issubset(agent_df.columns):
-        agent_df = agent_df.sort_values(["RunId", "Step", "AgentID"]).reset_index(drop=True)
-
-    if not summary_df.empty and "Optimization Score" in summary_df.columns:
-        summary_df = summary_df.sort_values(["Optimization Score", "RunId"], ascending=[False, True]).reset_index(drop=True)
-
-    return final_df, summary_df, agent_df
+# ---------- Optuna objective ---------------------------------------------
 
 def objective(trial):
-    """Objective function for Optuna Bayesian optimization."""
-    params = MODEL_DEFAULTS.copy()
-    params["num_agents"] = trial.suggest_int("num_agents", 40, 60)
-    params["pheromone_decay_rate"] = trial.suggest_float("pheromone_decay_rate", 0.01, 0.20)
-    params["safety_buffer_steps"] = trial.suggest_int("safety_buffer_steps", 1, 3)
-    params["foraging_start_threshold"] = trial.suggest_float("foraging_start_threshold", 0.85, 0.95)
-    params["pheromone_memory_weight"] = trial.suggest_float("pheromone_memory_weight", 0.05, 0.15)
-    params["pheromone_base_drop"] = trial.suggest_float("pheromone_base_drop", 0.5, 1.5)
-    params["pheromone_follow_prob"] = trial.suggest_float("pheromone_follow_prob", 0.5, 0.9)
+    suggested = {
+        "num_agents": trial.suggest_int("num_agents", 40, 60),
+        "pheromone_decay_rate": trial.suggest_float("pheromone_decay_rate", 0.01, 0.20),
+        "safety_buffer_steps": trial.suggest_int("safety_buffer_steps", 1, 3),
+        "foraging_start_threshold": trial.suggest_float("foraging_start_threshold", 0.85, 0.95),
+        "pheromone_memory_weight": trial.suggest_float("pheromone_memory_weight", 0.05, 0.15),
+        "pheromone_base_drop": trial.suggest_float("pheromone_base_drop", 0.5, 1.5),
+        "pheromone_follow_prob": trial.suggest_float("pheromone_follow_prob", 0.5, 0.9),
+    }
+    parameters = {**FIXED_PARAMS, **suggested}
 
-    _, summary_df, _ = _simulate_runs(
-        params,
-        runs=EVALUATION_RUNS,
-        max_steps=43200,
-        seed_start=trial.number * 1000,
-        show_progress=False,
-    )
+    base = trial.number * 1000
+    seeds = range(base, base + EVALUATION_RUNS)
 
-    return float(summary_df["Optimization Score"].mean()) if not summary_df.empty else 0.0
+    df = _run_seeds(parameters, seeds, max_steps=TRIAL_MAX_STEPS, per_step=False)
+    df = _add_derived_metrics(df, max_steps=TRIAL_MAX_STEPS)
 
-def run_optimization_search(n_trials=50, show_progress=True):
-    """Run Optuna search and return the completed study."""
-    study = optuna.create_study(direction="maximize", study_name=experiment_name)
-    study.optimize(objective, n_trials=n_trials, show_progress_bar=show_progress)
-    return study
+    return float(df["Optimization Score"].mean()) if not df.empty else 0.0
 
-def run_final_confirmation(best_params, runs=FINAL_CONFIRMATION_RUNS, max_steps=129600, show_progress=True):
-    """Run the final batch using the optimized parameters."""
-    final_params = {**MODEL_DEFAULTS, **best_params}
-    return _simulate_runs(
-        final_params,
-        runs=runs,
-        max_steps=max_steps,
-        seed_start=0,
-        show_progress=show_progress,
-    )
 
-def save_results(final_df, summary_df=None, agent_df=None, file_name=None):
-    """Save batch results to timestamped CSV files."""
+# ---------- Final confirmation -------------------------------------------
+
+def run_final_confirmation(best_params, runs=FINAL_CONFIRMATION_RUNS, max_steps=FINAL_MAX_STEPS):
+    """Replay the best configuration with full per-step traces."""
+    parameters = {**FIXED_PARAMS, **best_params}
+    seeds = range(runs)
+
+    return _run_seeds(parameters, seeds, max_steps=max_steps, per_step=True)
+
+
+# ---------- I/O ----------------------------------------------------------
+
+def save_results(df, file_name=None):
     if file_name is None:
-        file_name = f"{experiment_name}_optimized_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+        file_name = f"{EXPERIMENT_NAME}_optimized_{ts}.csv"
 
-    results_path = os.path.dirname(os.path.abspath(__file__))
-    csv_file = os.path.join(results_path, file_name)
-    final_df.to_csv(csv_file, index=False)
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), file_name)
+    df.to_csv(path, index=False)
 
-    summary_csv_file = None
-    if summary_df is not None and not summary_df.empty:
-        base_name, extension = os.path.splitext(file_name)
-        summary_csv_file = os.path.join(results_path, f"{base_name}_summary{extension}")
-        summary_df.to_csv(summary_csv_file, index=False)
+    return path
 
-    agent_csv_file = None
-    if agent_df is not None and not agent_df.empty:
-        base_name, extension = os.path.splitext(file_name)
-        agent_csv_file = os.path.join(results_path, f"{base_name}_agents{extension}")
-        agent_df.to_csv(agent_csv_file, index=False)
 
-    return {
-        "csv_file": csv_file,
-        "summary_csv_file": summary_csv_file,
-        "agent_csv_file": agent_csv_file,
-    }
+# ---------- Top-level orchestration --------------------------------------
 
-def run_experiment(n_trials=50, final_runs=FINAL_CONFIRMATION_RUNS, final_max_steps=129600):
-    """Execute the optimization search and final confirmation batch."""
-    freeze_support()
+def run_experiment(n_trials=50):
+    study = optuna.create_study(direction="maximize", study_name=EXPERIMENT_NAME)
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
-    study = run_optimization_search(n_trials=n_trials, show_progress=True)
-    final_df, summary_df, agent_df = run_final_confirmation(
-        study.best_params,
-        runs=final_runs,
-        max_steps=final_max_steps,
-        show_progress=True,
-    )
-    saved_files = save_results(final_df, summary_df=summary_df, agent_df=agent_df)
+    final_df = run_final_confirmation(study.best_params)
+    csv_file = save_results(final_df)
 
-    return {
-        "study": study,
-        "final_df": final_df,
-        "summary_df": summary_df,
-        "agent_df": agent_df,
-        **saved_files,
-    }
+    print(f"Best params: {study.best_params}")
+    print(f"Best value:  {study.best_value:.4f}")
+    print(f"Saved trace: {csv_file}")
+    
+    return {"study": study, "final_df": final_df, "csv_file": csv_file}
+
+
+if __name__ == "__main__":
+    run_experiment()

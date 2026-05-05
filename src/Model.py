@@ -12,12 +12,9 @@ class Environment(Model):
                  safety_buffer_steps=2, foraging_start_threshold=0.9,
                  pheromone_memory_weight=0.1,
                  pheromone_base_drop=1.0, pheromone_follow_prob=0.7,
-                 rng=None): #RNG default for reproducibility
+                 seed=None): #RNG default for reproducibility
         
-        super().__init__()
-        
-        if rng is not None:
-            self.random = rng
+        super().__init__(seed=seed)
             
         # Grid and Agent Setup
         self.grid = OrthogonalMooreGrid((width, height), torus=False, capacity=100, random=self.random)
@@ -158,7 +155,7 @@ class Environment(Model):
     def _all_agent_food_collections(self):
         active_collections = [
             agent.lifetime_food_collected
-            for agent in self.agents_by_type.get(CreatureAgent, [])
+            for agent in self.agents_by_type[CreatureAgent]
         ]
         return [*self.completed_agent_food_collections, *active_collections]
 
@@ -181,7 +178,7 @@ class Environment(Model):
         return max(0.0, min(1.0, gini))
 
     def _update_thermal_load(self):
-        active_agents = self.agents_by_type.get(CreatureAgent, [])
+        active_agents = self.agents_by_type[CreatureAgent]
         step_heat_load = sum(max(0.0, agent.temperature - agent.T_safe) for agent in active_agents)
         self.cumulative_thermal_load += step_heat_load
 
@@ -192,7 +189,7 @@ class Environment(Model):
         return self.total_food_collected / self.steps_elapsed
 
     def calculate_spatial_entropy(self):
-        agents = self.agents_by_type.get(CreatureAgent, [])
+        agents = self.agents_by_type[CreatureAgent]
         if len(agents) <= 1:
             return 0.0
 
@@ -221,21 +218,21 @@ class Environment(Model):
         return self._gini_coefficient(self._all_agent_food_collections())
 
     def calculate_mean_agent_energy(self):
-        agents = self.agents_by_type.get(CreatureAgent, [])
+        agents = self.agents_by_type[CreatureAgent]
         if not agents:
             return 0.0
 
         return sum(agent.energy for agent in agents) / len(agents)
 
     def calculate_mean_agent_temperature(self):
-        agents = self.agents_by_type.get(CreatureAgent, [])
+        agents = self.agents_by_type[CreatureAgent]
         if not agents:
             return 0.0
 
         return sum(agent.temperature for agent in agents) / len(agents)
 
     def calculate_mean_distance_to_nest(self):
-        agents = self.agents_by_type.get(CreatureAgent, [])
+        agents = self.agents_by_type[CreatureAgent]
         if not agents:
             return 0.0
 
@@ -255,8 +252,7 @@ class Environment(Model):
         return sum(all_collections) / len(all_collections)
 
     def step(self):
-        if CreatureAgent in self.agents_by_type:
-            self.agents_by_type[CreatureAgent].shuffle().do('step')
+        self.agents_by_type[CreatureAgent].shuffle_do("step")
 
         self.pheromone_layer.data *= (1.0 - self.pheromone_decay_rate)
         self._update_thermal_load()
@@ -264,5 +260,5 @@ class Environment(Model):
 
         self.datacollector.collect(self)
 
-        if len(self.agents_by_type.get(CreatureAgent, [])) == 0:
+        if len(self.agents_by_type[CreatureAgent]) == 0:
             self.running = False
