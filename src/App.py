@@ -3,8 +3,8 @@ from mesa.visualization import SolaraViz, SpaceRenderer, make_plot_component
 from mesa.visualization.components import AgentPortrayalStyle, PropertyLayerStyle
 
 from Model import Environment
-from Agent import CreatureAgent
-
+from CreatureAgent import CreatureAgent
+from EnvCell import EnvCell
 
 def agent_portrayal(agent):
     if agent is None:

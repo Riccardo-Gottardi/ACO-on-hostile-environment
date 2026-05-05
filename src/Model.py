@@ -99,18 +99,17 @@ class Environment(Model):
 
         nest_cell = self.grid[self.nest_coords[0], self.nest_coords[1]]
         for _ in range(self.num_agents):
-            agent = CreatureAgent(self, len(self.agents), nest_cell)
-            self.agents.add(agent)
+            CreatureAgent(self, nest_cell)
 
         self.initial_food = float(self.food_layer.data.sum())
 
         # Data Collector
         self.datacollector = DataCollector(
             model_reporters={
-                "Foraging": lambda m: sum(1 for a in m.agents_by_type.get(CreatureAgent, []) if a.state == "FORAGING"),
-                "Returning": lambda m: sum(1 for a in m.agents_by_type.get(CreatureAgent, []) if a.state == "RETURNING"),
-                "Resting": lambda m: sum(1 for a in m.agents_by_type.get(CreatureAgent, []) if a.state == "RESTING"),
-                "Alive": lambda m: len(m.agents_by_type.get(CreatureAgent, [])),
+                "Foraging": lambda m: sum(1 for a in m.agents_by_type[CreatureAgent] if a.state == "FORAGING"),
+                "Returning": lambda m: sum(1 for a in m.agents_by_type[CreatureAgent] if a.state == "RETURNING"),
+                "Resting": lambda m: sum(1 for a in m.agents_by_type[CreatureAgent] if a.state == "RESTING"),
+                "Alive": lambda m: len(m.agents_by_type[CreatureAgent]),
                 "Dead (Energy)": lambda m: m.deaths_energy,
                 "Dead (Temperature)": lambda m: m.deaths_temperature,
                 "Deaths Foraging (Energy)": lambda m: m.deaths_foraging_energy,

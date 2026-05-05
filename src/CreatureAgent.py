@@ -1,9 +1,8 @@
 from mesa.discrete_space import CellAgent
 
 class CreatureAgent(CellAgent):
-    def __init__(self, model, unique_id, cell):
+    def __init__(self, model, cell):
         super().__init__(model)
-        self.unique_id = unique_id
         self.cell = cell
         
         # State Variables
