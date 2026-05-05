@@ -46,13 +46,14 @@ def _score_row(row):
 
     fairness = max(0.0, min(1.0, 1.0 - row["Load Gini"]))
     
-    return (
-        0.30 * survival
-        + 0.20 * food
-        + 0.20 * retrieval
-        + 0.20 * thermal
-        + 0.10 * fairness
-    )
+    food_bonus = 0.05 * food
+    retrieval_bonus = 0.02 * retrieval
+    thermal_bonus = 0.02 * thermal
+    fairness_bonus = 0.01 * fairness
+    
+    total_multiplier = 1.0 + food_bonus + retrieval_bonus + thermal_bonus + fairness_bonus
+    
+    return survival * total_multiplier
 
 
 def _add_derived_metrics(df, max_steps):
