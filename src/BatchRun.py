@@ -17,8 +17,8 @@ from Model import Environment
 warnings.simplefilter("ignore", category=FutureWarning)
 
 EXPERIMENT_NAME = "swarm_foraging_experiment"
-EVALUATION_RUNS = 10           # seeds swept per Optuna trial
-FINAL_CONFIRMATION_RUNS = 5    # seeds for the final, high-fidelity batch
+EVALUATION_RUNS = 15          # seeds swept per Optuna trial
+FINAL_CONFIRMATION_RUNS = 30    # seeds for the final, high-fidelity batch
 TRIAL_MAX_STEPS = 43_200
 FINAL_MAX_STEPS = 129_600
 
@@ -45,7 +45,7 @@ def _score_row(row):
         thermal = 0.0
 
     fairness = max(0.0, min(1.0, 1.0 - row["Load Gini"]))
-    
+
     food_bonus = 0.05 * food
     retrieval_bonus = 0.02 * retrieval
     thermal_bonus = 0.02 * thermal
@@ -97,12 +97,12 @@ def _run_seeds(parameters, seeds, max_steps, *, per_step=False):
 def objective(trial):
     suggested = {
         "num_agents": trial.suggest_int("num_agents", 40, 60),
-        "pheromone_decay_rate": trial.suggest_float("pheromone_decay_rate", 0.01, 0.20),
-        "safety_buffer_steps": trial.suggest_int("safety_buffer_steps", 1, 3),
-        "foraging_start_threshold": trial.suggest_float("foraging_start_threshold", 0.85, 0.95),
-        "pheromone_memory_weight": trial.suggest_float("pheromone_memory_weight", 0.05, 0.15),
-        "pheromone_base_drop": trial.suggest_float("pheromone_base_drop", 0.5, 1.5),
-        "pheromone_follow_prob": trial.suggest_float("pheromone_follow_prob", 0.5, 0.9),
+        "pheromone_decay_rate": trial.suggest_float("pheromone_decay_rate", 0.01, 0.1),
+        "safety_buffer_steps": trial.suggest_int("safety_buffer_steps", 1, 5),
+        "foraging_start_threshold": trial.suggest_float("foraging_start_threshold", 0.5, 1.0),
+        "pheromone_memory_weight": trial.suggest_float("pheromone_memory_weight", 0.0, 0.5),
+        "pheromone_base_drop": trial.suggest_float("pheromone_base_drop", 0.0, 2.0),
+        "pheromone_follow_prob": trial.suggest_float("pheromone_follow_prob", 0.0, 1.0),
     }
     parameters = {**FIXED_PARAMS, **suggested}
 
@@ -140,7 +140,7 @@ def save_results(df, file_name=None):
 
 # ---------- Top-level orchestration --------------------------------------
 
-def run_experiment(n_trials=50):
+def run_experiment(n_trials=300):
     study = optuna.create_study(direction="maximize", study_name=EXPERIMENT_NAME)
     study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 

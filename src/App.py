@@ -55,7 +55,7 @@ model_params = {
         "value": 0.05,
         "label": "Pheromone Decay Rate",
         "min": 0.01,
-        "max": 0.05,
+        "max": 0.1,
         "step": 0.01
     },
     "safety_buffer_steps": {
