@@ -1,9 +1,9 @@
 import math
-
 import numpy as np
 from mesa import DataCollector, Model
 from mesa.discrete_space import OrthogonalMooreGrid, PropertyLayer
 from Agent import CreatureAgent
+from Agent import State
 
 class Environment(Model):
     def __init__(self, width=60, height=60, num_agents=50, 
@@ -58,7 +58,7 @@ class Environment(Model):
 
         for _ in range(n_food_clusters):
             valid_start = False
-
+            cx = cy = 0
             while not valid_start:
                 cx = self.random.randint(0, width - 1)
                 cy = self.random.randint(0, height - 1)
@@ -103,9 +103,9 @@ class Environment(Model):
         # Data Collector
         self.datacollector = DataCollector(
             model_reporters={
-                "Foraging": lambda m: sum(1 for a in m.agents_by_type[CreatureAgent] if a.state == "FORAGING"),
-                "Returning": lambda m: sum(1 for a in m.agents_by_type[CreatureAgent] if a.state == "RETURNING"),
-                "Resting": lambda m: sum(1 for a in m.agents_by_type[CreatureAgent] if a.state == "RESTING"),
+                "Foraging": lambda m: sum(1 for a in m.agents_by_type[CreatureAgent] if a.state == State.FORAGING),
+                "Returning": lambda m: sum(1 for a in m.agents_by_type[CreatureAgent] if a.state == State.RETURNING),
+                "Resting": lambda m: sum(1 for a in m.agents_by_type[CreatureAgent] if a.state == State.RESTING),
                 "Alive": lambda m: len(m.agents_by_type[CreatureAgent]),
                 "Dead (Energy)": lambda m: m.deaths_energy,
                 "Dead (Temperature)": lambda m: m.deaths_temperature,

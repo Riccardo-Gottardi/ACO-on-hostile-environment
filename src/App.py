@@ -15,7 +15,7 @@ def agent_portrayal(agent):
             "FORAGING": "black",
             "RETURNING": "red",
         }
-        color = color_map.get(agent.state, "grey")
+        color = color_map.get(agent.state.value, "grey")
         return AgentPortrayalStyle(size=50, marker="o", zorder=2, color=color)
 
 

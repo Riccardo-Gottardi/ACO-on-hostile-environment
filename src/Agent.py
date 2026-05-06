@@ -1,12 +1,17 @@
 import math
-
+from enum import Enum
 from mesa.discrete_space import CellAgent
 
-# Return-reason flag values. Set when state == "RETURNING", None otherwise.
-RETURN_FOOD = "FOOD"      # carrying food, slow return, dropping pheromone
-RETURN_DANGER = "DANGER"  # no food, panic-fast escape, no pheromone
-RETURN_BOTH = "BOTH"      # carrying food AND slow-return is now unsafe
+class ReturnReason(Enum):
+    RETURN_FOOD = "FOOD"      # carrying food, slow return, dropping pheromone
+    RETURN_DANGER = "DANGER"  # no food, panic-fast escape, no pheromone
+    RETURN_BOTH = "BOTH"      # carrying food AND slow-return is now unsafe
+    NONE = None
 
+class State(Enum):
+    FORAGING = "FORAGING"
+    RETURNING = "RETURNING"
+    RESTING = "RESTING"
 
 class CreatureAgent(CellAgent):
     def __init__(self, model, cell):
@@ -14,7 +19,7 @@ class CreatureAgent(CellAgent):
         self.cell = cell
 
         # State variables
-        self.state = "FORAGING"
+        self.state = State.FORAGING
         self.return_reason = None      # FOOD | DANGER | BOTH | None
         self.E_max = 1000.0
         self.energy = self.E_max
@@ -149,9 +154,9 @@ class CreatureAgent(CellAgent):
 
     def move(self):
         match self.state:
-            case "FORAGING":
+            case State.FORAGING:
                 self.move_logic_foraging()
-            case "RETURNING":
+            case State.RETURNING:
                 self.move_logic_returning()
 
     def move_logic_foraging(self):
@@ -213,19 +218,20 @@ class CreatureAgent(CellAgent):
         # (e.g. deaths_returning_food vs _danger vs _both), add per-reason
         # counters to Model.py and switch on self.return_reason here.
         if self.is_dead():
-            if self.state == "FORAGING":
+            if self.state == State.FORAGING:
                 self.model.deaths_foraging += 1
                 if self.energy <= 0:
                     self.model.deaths_foraging_energy += 1
                 else:
                     self.model.deaths_foraging_temperature += 1
-            elif self.state == "RETURNING":
+
+            elif self.state == State.RETURNING:
                 self.model.deaths_returning += 1
                 if self.energy <= 0:
                     self.model.deaths_returning_energy += 1
                 else:
                     self.model.deaths_returning_temperature += 1
-            elif self.state == "RESTING":
+            elif self.state == State.RESTING:
                 self.model.deaths_resting += 1
                 if self.energy <= 0:
                     self.model.deaths_resting_energy += 1
@@ -248,7 +254,7 @@ class CreatureAgent(CellAgent):
 
         # ----- State machine -----
         match self.state:
-            case "FORAGING":
+            case State.FORAGING:
                 if self.is_on_food():
                     self.consume_food()  # one eat this tick, then re-evaluate
                     e_danger, h_danger = self._project_danger_slow()
@@ -256,31 +262,31 @@ class CreatureAgent(CellAgent):
                     if not e_danger or h_danger:
                         # Energy is sufficient OR heat is the binding constraint
                         # (more eating won't cool us down — time to leave).
-                        self.return_reason = RETURN_FOOD
+                        self.return_reason = ReturnReason.RETURN_FOOD
                         if any(self._project_danger_slow()):
                             self._resolve_return_reason_after_slow_danger()
-                        self.state = "RETURNING"
+                        self.state = State.RETURNING
 
                     elif any(self._project_danger_fast()):
                         # Still energy-deficient but we've run out of time even for fast escape.
                         # Must leave now regardless — escalate immediately.
-                        self.return_reason = RETURN_FOOD
+                        self.return_reason = ReturnReason.RETURN_FOOD
                         self._resolve_return_reason_after_slow_danger()  # -> BOTH
-                        self.state = "RETURNING"
+                        self.state = State.RETURNING
 
                     # else: e_danger=True, h_danger=False, fast escape still safe.
                     # Stay put, eat again next tick. move_logic_foraging already no-ops on food.
 
                 elif any(self._project_danger_fast()):
-                    self.return_reason = RETURN_DANGER
-                    self.state = "RETURNING"
+                    self.return_reason = ReturnReason.RETURN_DANGER
+                    self.state = State.RETURNING
 
                 else:
                     self.move()
 
-            case "RETURNING":
+            case State.RETURNING:
                 if self.is_in_nest():
-                    self.state = "RESTING"
+                    self.state = State.RESTING
                     self.has_food = False
                     self.return_reason = None
                 else:
@@ -290,7 +296,7 @@ class CreatureAgent(CellAgent):
                     #   - currently on a food cell
                     #   - energy is the bottleneck and heat is not (eating only fixes energy)
                     #   - post-eat energy clears the slow-return threshold
-                    if self.return_reason == RETURN_FOOD and self.is_on_food():
+                    if self.return_reason == ReturnReason.RETURN_FOOD and self.is_on_food():
                         e_danger, h_danger = self._project_danger_slow()
                         if e_danger and not h_danger:
                             dist = self._chebyshev_distance(self.cell.coordinate, self.model.nest_coords)
@@ -303,14 +309,14 @@ class CreatureAgent(CellAgent):
                     # ---- FOOD -> BOTH upgrade ----
                     # If still FOOD after the optional eat, re-check slow-projection.
                     # If now unsafe, escalate via the resolver.
-                    if self.return_reason == RETURN_FOOD and any(self._project_danger_slow()):
+                    if self.return_reason == ReturnReason.RETURN_FOOD and any(self._project_danger_slow()):
                         self._resolve_return_reason_after_slow_danger()
 
                     self.move()
 
-            case "RESTING":
+            case State.RESTING:
                 self.cool_down()
                 if self.should_start_foraging():
-                    self.state = "FORAGING"
+                    self.state = State.FORAGING
 
         self.age_steps += 1
