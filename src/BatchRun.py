@@ -30,6 +30,16 @@ FIXED_PARAMS = {
     "food_base_quantity": 10,
 }
 
+HYPOTHESIS_PARAMS = {
+    "num_agents": 50,
+    "pheromone_decay_rate": 0.03,
+    "pheromone_follow_prob": 0.75,
+    "foraging_start_threshold": 0.90,
+    "safety_buffer_steps": 2,
+    "pheromone_base_drop": 1.0,
+    "pheromone_memory_weight": 0.2,
+}
+
 
 # ---------- Scoring -------------------------------------------------------
 
@@ -125,6 +135,14 @@ def run_final_confirmation(best_params, runs=FINAL_CONFIRMATION_RUNS, max_steps=
     return _run_seeds(parameters, seeds, max_steps=max_steps, per_step=True)
 
 
+def run_hypothesized_confirmation(runs=FINAL_CONFIRMATION_RUNS, max_steps=FINAL_MAX_STEPS):
+    """Replay the hypothesized configuration with full per-step traces."""
+    parameters = {**FIXED_PARAMS, **HYPOTHESIS_PARAMS}
+    seeds = range(runs)
+
+    return _run_seeds(parameters, seeds, max_steps=max_steps, per_step=True)
+
+
 # ---------- I/O ----------------------------------------------------------
 
 def save_results(df, file_name=None):
@@ -144,14 +162,26 @@ def run_experiment(n_trials=300):
     study = optuna.create_study(direction="maximize", study_name=EXPERIMENT_NAME)
     study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
+    ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+
     final_df = run_final_confirmation(study.best_params)
-    csv_file = save_results(final_df)
+    final_csv = save_results(final_df, file_name=f"{EXPERIMENT_NAME}_optimized_{ts}.csv")
+
+    hypothesized_df = run_hypothesized_confirmation()
+    hypothesized_csv = save_results(hypothesized_df, file_name=f"{EXPERIMENT_NAME}_hypothesized_{ts}.csv")
 
     print(f"Best params: {study.best_params}")
     print(f"Best value:  {study.best_value:.4f}")
-    print(f"Saved trace: {csv_file}")
+    print(f"Saved optimized trace: {final_csv}")
+    print(f"Saved hypothesized trace: {hypothesized_csv}")
     
-    return {"study": study, "final_df": final_df, "csv_file": csv_file}
+    return {
+        "study": study,
+        "final_df": final_df,
+        "final_csv": final_csv,
+        "hypothesized_df": hypothesized_df,
+        "hypothesized_csv": hypothesized_csv,
+    }
 
 
 if __name__ == "__main__":
