@@ -1,2 +1,6 @@
 Mesa==3.5.1
 solara==1.57.3
+starlette==0.20.4
+optuna==4.8.0
+numpy==2.4.4
+pandas==3.0.2
