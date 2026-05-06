@@ -44,7 +44,7 @@ model_params = {
     "height": 60,
     "num_agents": {
         "type": "SliderInt",
-        "value": 50,
+        "value": 41,
         "label": "Number of Agents",
         "min": 40,
         "max": 60,
@@ -52,7 +52,7 @@ model_params = {
     },
     "pheromone_decay_rate": {
         "type": "SliderFloat",
-        "value": 0.05,
+        "value": 0.065073771,
         "label": "Pheromone Decay Rate",
         "min": 0.01,
         "max": 0.1,
@@ -68,7 +68,7 @@ model_params = {
     },
     "foraging_start_threshold": {
         "type": "SliderFloat",
-        "value": 0.9,
+        "value": 0.587912346,
         "label": "Foraging Start Threshold",
         "min": 0.5,
         "max": 1.0,
@@ -76,7 +76,7 @@ model_params = {
     },
     "pheromone_memory_weight": {
         "type": "SliderFloat",
-        "value": 0.1,
+        "value": 0.140481121,
         "label": "Pheromone Memory Weight",
         "min": 0.0,
         "max": 0.5,
@@ -84,7 +84,7 @@ model_params = {
     },
     "pheromone_base_drop": {
         "type": "SliderFloat",
-        "value": 1.0,
+        "value": 1.095370208,
         "label": "Pheromone Base Drop",
         "min": 0.0,
         "max": 2.0,
@@ -92,7 +92,7 @@ model_params = {
     },
     "pheromone_follow_prob": {
         "type": "SliderFloat",
-        "value": 0.7,
+        "value": 0.004365772,
         "label": "Pheromone Follow Probability",
         "min": 0.0,
         "max": 1.0,
@@ -106,16 +106,16 @@ model_params = {
 model = Environment(
     width=60,
     height=60,
-    num_agents=50,
+    num_agents=41,
     n_food_clusters=12,
     food_area_percentage=0.15,
     food_base_quantity=10,
-    pheromone_decay_rate=0.05,
+    pheromone_decay_rate=0.065073771,
     safety_buffer_steps=2,
-    foraging_start_threshold=0.9,
-    pheromone_memory_weight=0.1,
-    pheromone_base_drop=1.0,
-    pheromone_follow_prob=0.7,
+    foraging_start_threshold=0.587912346,
+    pheromone_memory_weight=0.140481121,
+    pheromone_base_drop=1.095370208,
+    pheromone_follow_prob=0.004365772,
 )
 
 renderer = SpaceRenderer(model=model, backend="matplotlib")
