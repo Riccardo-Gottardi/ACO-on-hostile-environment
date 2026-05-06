@@ -15,7 +15,7 @@ def agent_portrayal(agent):
             "FORAGING": "black",
             "RETURNING": "red",
         }
-        color = color_map.get(agent.state.value, "grey")
+        color = color_map.get(agent.state, "grey")
         return AgentPortrayalStyle(size=50, marker="o", zorder=2, color=color)
 
 
@@ -52,7 +52,7 @@ model_params = {
     },
     "pheromone_decay_rate": {
         "type": "SliderFloat",
-        "value": 0.065073771,
+        "value": 0.08398728124504551,
         "label": "Pheromone Decay Rate",
         "min": 0.01,
         "max": 0.1,
@@ -60,7 +60,7 @@ model_params = {
     },
     "safety_buffer_steps": {
         "type": "SliderInt",
-        "value": 2,
+        "value": 5,
         "label": "Safety Buffer Steps",
         "min": 0,
         "max": 5,
@@ -68,7 +68,7 @@ model_params = {
     },
     "foraging_start_threshold": {
         "type": "SliderFloat",
-        "value": 0.587912346,
+        "value": 0.5338713422482341,
         "label": "Foraging Start Threshold",
         "min": 0.5,
         "max": 1.0,
@@ -76,7 +76,7 @@ model_params = {
     },
     "pheromone_memory_weight": {
         "type": "SliderFloat",
-        "value": 0.140481121,
+        "value": 0.13064670310993776,
         "label": "Pheromone Memory Weight",
         "min": 0.0,
         "max": 0.5,
@@ -84,7 +84,7 @@ model_params = {
     },
     "pheromone_base_drop": {
         "type": "SliderFloat",
-        "value": 1.095370208,
+        "value": 0.9830364928071188,
         "label": "Pheromone Base Drop",
         "min": 0.0,
         "max": 2.0,
@@ -92,7 +92,7 @@ model_params = {
     },
     "pheromone_follow_prob": {
         "type": "SliderFloat",
-        "value": 0.004365772,
+        "value": 0.022401662608558037,
         "label": "Pheromone Follow Probability",
         "min": 0.0,
         "max": 1.0,
@@ -106,16 +106,16 @@ model_params = {
 model = Environment(
     width=60,
     height=60,
-    num_agents=41,
+    num_agents=46,
     n_food_clusters=12,
     food_area_percentage=0.15,
     food_base_quantity=10,
-    pheromone_decay_rate=0.065073771,
-    safety_buffer_steps=2,
-    foraging_start_threshold=0.587912346,
-    pheromone_memory_weight=0.140481121,
-    pheromone_base_drop=1.095370208,
-    pheromone_follow_prob=0.004365772,
+    pheromone_decay_rate=0.08398728124504551,
+    safety_buffer_steps=5,
+    foraging_start_threshold=0.5338713422482341,
+    pheromone_memory_weight=0.13064670310993776,
+    pheromone_base_drop=0.9830364928071188,
+    pheromone_follow_prob=0.022401662608558037,
 )
 
 renderer = SpaceRenderer(model=model, backend="matplotlib")
