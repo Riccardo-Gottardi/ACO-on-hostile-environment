@@ -191,19 +191,16 @@ class CreatureAgent(CellAgent):
 
         old_coord = self.cell.coordinate
 
-        # Speed split:
-        # - has_food=True (FOOD/BOTH): slow (1 cell/tick), drop pheromone
-        # - has_food=False (DANGER):   fast (max_speed/tick), no pheromone
-        if self.has_food:
+        if self.return_reason in {ReturnReason.RETURN_FOOD, ReturnReason.RETURN_BOTH}:
             self.drop_pheromone()
             radius = 1
-        else:
+        else:   # self.return_reason == ReturnReason.RETURN_DANGER
             radius = self.max_speed
 
         neighbors = self.cell.get_neighborhood(radius=radius, include_center=False)
         best_cell = min(
             neighbors,
-            key=lambda c: (self._chebyshev_distance(c.coordinate, self.model.nest_coords) + self._eucledian_distance(c.coordinate, self.model.nest_coords)),
+            key=lambda c: self._eucledian_distance(c.coordinate, self.model.nest_coords),
         )
         self.cell = best_cell
 
