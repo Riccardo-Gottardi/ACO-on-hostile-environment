@@ -74,14 +74,6 @@ model_params = {
         "max": 1.0,
         "step": 0.01
     },
-    "pheromone_memory_weight": {
-        "type": "SliderFloat",
-        "value": 0.13064670310993776,
-        "label": "Pheromone Memory Weight",
-        "min": 0.0,
-        "max": 0.5,
-        "step": 0.05
-    },
     "pheromone_base_drop": {
         "type": "SliderFloat",
         "value": 0.9830364928071188,
@@ -98,6 +90,14 @@ model_params = {
         "max": 1.0,
         "step": 0.05
     },
+    "food_richness_memory_regulator": {
+        "type": "SliderFloat",
+        "value": 0.05,
+        "label": "Pheromone Memory Weight",
+        "min": 0.0,
+        "max": 0.1,
+        "step": 0.005
+    },
     "food_area_percentage": 0.15,
     "food_base_quantity": 10,
     "n_food_clusters": 12
@@ -113,9 +113,9 @@ model = Environment(
     pheromone_decay_rate=0.08398728124504551,
     safety_buffer_steps=5,
     foraging_start_threshold=0.5338713422482341,
-    pheromone_memory_weight=0.13064670310993776,
     pheromone_base_drop=0.9830364928071188,
     pheromone_follow_prob=0.022401662608558037,
+    food_richness_memory_regulator=0.05
 )
 
 renderer = SpaceRenderer(model=model, backend="matplotlib")

@@ -37,11 +37,11 @@ HYPOTHESIS_PARAMS = {
     "foraging_start_threshold": 0.90,
     "safety_buffer_steps": 2,
     "pheromone_base_drop": 1.0,
-    "pheromone_memory_weight": 0.2,
+    "food_richness_memory_regulator": 0.05
 }
 
 
-# ---------- Scoring -------------------------------------------------------
+# =========== Scoring =======================================================-----
 
 def _score_row(row):
     """Map one batch_run result row into an Optimization Score in [0, 1]."""
@@ -80,7 +80,7 @@ def _add_derived_metrics(df, max_steps):
     return df
 
 
-# ---------- Core: run a sweep over seeds ---------------------------------
+# =========== Core: run a sweep over seeds =================================---
 
 def _run_seeds(parameters, seeds, max_steps, *, per_step=False):
     """Sweep `seeds` for one configuration via mesa.batch_run.
@@ -102,7 +102,7 @@ def _run_seeds(parameters, seeds, max_steps, *, per_step=False):
     return pd.DataFrame(results)
 
 
-# ---------- Optuna objective ---------------------------------------------
+# =========== Optuna objective ============================================-----
 
 def objective(trial):
     suggested = {
@@ -110,9 +110,9 @@ def objective(trial):
         "pheromone_decay_rate": trial.suggest_float("pheromone_decay_rate", 0.01, 0.1),
         "safety_buffer_steps": trial.suggest_int("safety_buffer_steps", 1, 5),
         "foraging_start_threshold": trial.suggest_float("foraging_start_threshold", 0.5, 1.0),
-        "pheromone_memory_weight": trial.suggest_float("pheromone_memory_weight", 0.0, 0.5),
         "pheromone_base_drop": trial.suggest_float("pheromone_base_drop", 0.0, 2.0),
         "pheromone_follow_prob": trial.suggest_float("pheromone_follow_prob", 0.0, 1.0),
+        "food_richness_memory_regulator": trial.suggest_float("food_richness_memory_regulator", 1e-3, 5e-1, log=True)
     }
     parameters = {**FIXED_PARAMS, **suggested}
 
@@ -125,7 +125,7 @@ def objective(trial):
     return float(df["Optimization Score"].mean()) if not df.empty else 0.0
 
 
-# ---------- Final confirmation -------------------------------------------
+# =========== Final confirmation ============================================---
 
 def run_final_confirmation(best_params, runs=FINAL_CONFIRMATION_RUNS, max_steps=FINAL_MAX_STEPS):
     """Replay the best configuration with full per-step traces."""
@@ -143,7 +143,7 @@ def run_hypothesized_confirmation(runs=FINAL_CONFIRMATION_RUNS, max_steps=FINAL_
     return _run_seeds(parameters, seeds, max_steps=max_steps, per_step=True)
 
 
-# ---------- I/O ----------------------------------------------------------
+# =========== I/O =======================================================--------
 
 def save_results(df, file_name=None):
     if file_name is None:
@@ -156,7 +156,7 @@ def save_results(df, file_name=None):
     return path
 
 
-# ---------- Top-level orchestration --------------------------------------
+# =========== Top-level orchestration =================================--------
 
 def run_experiment(n_trials=300):
     study = optuna.create_study(direction="maximize", study_name=EXPERIMENT_NAME)

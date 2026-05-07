@@ -20,7 +20,7 @@ class CreatureAgent(CellAgent):
 
         # State variables
         self.state = State.FORAGING
-        self.return_reason = None      # FOOD | DANGER | BOTH | None
+        self.return_reason = ReturnReason.NONE      # FOOD | DANGER | BOTH | None
         self.E_max = 1000.0
         self.energy = self.E_max
         self.temperature = 30.0
@@ -32,13 +32,14 @@ class CreatureAgent(CellAgent):
         self.T_crit = 53.0
         self.cost_E_rest = 0.5         # Per-tick basal metabolism
         self.cost_E_move = 5.0         # Per-cell additional cost when moving
-        self.cost_T_env = 0.2         # Per-tick heat gain when outside (independent of distance moved)
+        self.cost_T_env = 0.2          # Per-tick heat gain when outside (independent of distance moved)
         self.cool_rate = 0.5           # Per-tick heat loss when in nest
         self.max_speed = 2
         self.food_energy_gain = 200.0
 
         # Memory
-        self.food_richness_memory = 0.0
+        self.food_richness_memory = 0.0             # Overestimate of the food sensed
+        self.sensed_neighborhood = set()            # Keeps in mind the sensed cells for food
         self.has_food = False
 
     # =========== Helper Functions ===========
@@ -61,7 +62,7 @@ class CreatureAgent(CellAgent):
 
         return any(food_layer[c.coordinate] > 0 for c in neighbors)
 
-    # ---------- Danger projections ----------
+    # =========== Danger projections ===========
 
     def _project_danger(self, n_ticks, n_cells):
         """For a hypothetical journey, return (energy_danger, heat_danger).
@@ -101,11 +102,11 @@ class CreatureAgent(CellAgent):
 
         if not (e_fast or h_fast):
             self.has_food = False
-            self.return_reason = State.RETURN_DANGER
+            self.return_reason = ReturnReason.RETURN_DANGER
         else:
-            self.return_reason = State.RETURN_BOTH
+            self.return_reason = ReturnReason.RETURN_BOTH
 
-    # ---------- Cost charging ----------
+    # =========== Cost charging ===========
 
     def base_tirement(self):
         self.energy -= self.cost_E_rest
@@ -117,7 +118,7 @@ class CreatureAgent(CellAgent):
     def cool_down(self):
         self.temperature = max(self.T_safe, self.temperature - self.cool_rate)
 
-    # ---------- Decision helpers ----------
+    # =========== Decision helpers ===========
 
     def should_start_foraging(self):
         if self.temperature <= self.T_safe or self.energy < (self.E_max * self.model.foraging_start_threshold):
@@ -125,12 +126,30 @@ class CreatureAgent(CellAgent):
         else:
             return False
 
-    # ---------- Actions ----------
+    # =========== Actions ===========
+
+    def count_new_food(self, cells):
+        food_layer = self.model.food_layer.data
+        candidate_cells = set(cells)
+        cells_to_check = candidate_cells - self.sensed_neighborhood
+
+        food_sensed = 0
+        for cell in cells_to_check:
+            food_sensed += food_layer[cell.coordinate]
+        
+        self.sensed_neighborhood.update(candidate_cells)
+
+        return food_sensed
+
+    def update_food_richness_memory(self):
+        neighbors = self.cell.get_neighborhood(radius=1, include_center=True)
+        self.food_richness_memory += self.count_new_food(neighbors)
 
     def consume_food(self):
         neighbors = self.cell.get_neighborhood(radius=1, include_center=True)
         food_layer = self.model.food_layer.data
         food_cells = [c for c in neighbors if food_layer[c.coordinate] > 0]
+
         if food_cells:
             target_cell = self.model.random.choice(food_cells)
             self.cell = target_cell
@@ -138,19 +157,18 @@ class CreatureAgent(CellAgent):
             food_layer[cx, cy] = max(0.0, food_layer[cx, cy] - 1.0)
             self.energy = min(self.E_max, self.energy + self.food_energy_gain)
             self.has_food = True
-            self.food_richness_memory = food_layer[cx, cy]
             self.lifetime_food_collected += 1
 
     def drop_pheromone(self):
         if self.has_food:
             pheromone_layer = self.model.pheromone_layer.data
-            cx, cy = self.cell.coordinate
-            pheromone_layer[cx, cy] += (
-                self.food_richness_memory * self.model.pheromone_memory_weight
-                + self.model.pheromone_base_drop
-            )
 
-    # ---------- Movement ----------
+            distance = self._chebyshev_distance(self.cell.coordinate, self.model.nest_coords)
+            minimum_pheromone = (2 * distance + self.model.safety_buffer_steps) * self.model.pheromone_decay_rate
+
+            pheromone_layer[self.cell.coordinate] += (minimum_pheromone + self.food_richness_memory * self.model.food_richness_memory_regulator)
+
+    # =========== Movement ===========
 
     def move(self):
         match self.state:
@@ -207,7 +225,7 @@ class CreatureAgent(CellAgent):
         n_cells = self._chebyshev_distance(old_coord, best_cell.coordinate)
         self.movement_tirement(n_cells)
 
-    # ---------- Step ----------
+    # =========== Step ===========
 
     def step(self):
         # ----- Death handling (preserved from previous logic) -----
@@ -253,6 +271,7 @@ class CreatureAgent(CellAgent):
         match self.state:
             case State.FORAGING:
                 if self.is_on_food():
+                    self.update_food_richness_memory()
                     self.consume_food()  # one eat this tick, then re-evaluate
                     e_danger, h_danger = self._project_danger_slow()
 
@@ -286,6 +305,8 @@ class CreatureAgent(CellAgent):
                     self.state = State.RESTING
                     self.has_food = False
                     self.return_reason = None
+                    self.food_richness_memory = 0
+                    self.sensed_neighborhood.clear()
                 else:
                     # Eat-while-returning (FOOD reason only).
                     # Conditions:
