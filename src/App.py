@@ -44,7 +44,7 @@ model_params = {
     "height": 60,
     "num_agents": {
         "type": "SliderInt",
-        "value": 41,
+        "value": 40,
         "label": "Number of Agents",
         "min": 40,
         "max": 60,
@@ -52,7 +52,7 @@ model_params = {
     },
     "pheromone_decay_rate": {
         "type": "SliderFloat",
-        "value": 0.08398728124504551,
+        "value": 0.05708643368410186,
         "label": "Pheromone Decay Rate",
         "min": 0.01,
         "max": 0.1,
@@ -60,7 +60,7 @@ model_params = {
     },
     "safety_buffer_steps": {
         "type": "SliderInt",
-        "value": 5,
+        "value": 1,
         "label": "Safety Buffer Steps",
         "min": 0,
         "max": 5,
@@ -68,23 +68,15 @@ model_params = {
     },
     "foraging_start_threshold": {
         "type": "SliderFloat",
-        "value": 0.5338713422482341,
+        "value": 0.5526216959818051,
         "label": "Foraging Start Threshold",
         "min": 0.5,
         "max": 1.0,
         "step": 0.01
     },
-    "pheromone_base_drop": {
-        "type": "SliderFloat",
-        "value": 0.9830364928071188,
-        "label": "Pheromone Base Drop",
-        "min": 0.0,
-        "max": 2.0,
-        "step": 0.1
-    },
     "pheromone_follow_prob": {
         "type": "SliderFloat",
-        "value": 0.022401662608558037,
+        "value": 0.6406957968582614,
         "label": "Pheromone Follow Probability",
         "min": 0.0,
         "max": 1.0,
@@ -92,7 +84,7 @@ model_params = {
     },
     "food_richness_memory_regulator": {
         "type": "SliderFloat",
-        "value": 0.05,
+        "value": 0.0016976792966602104,
         "label": "Pheromone Memory Weight",
         "min": 0.0,
         "max": 0.1,
@@ -106,16 +98,15 @@ model_params = {
 model = Environment(
     width=60,
     height=60,
-    num_agents=46,
+    num_agents=40,
     n_food_clusters=12,
     food_area_percentage=0.15,
     food_base_quantity=10,
-    pheromone_decay_rate=0.08398728124504551,
-    safety_buffer_steps=5,
-    foraging_start_threshold=0.5338713422482341,
-    pheromone_base_drop=0.9830364928071188,
-    pheromone_follow_prob=0.022401662608558037,
-    food_richness_memory_regulator=0.05
+    pheromone_decay_rate=0.05708643368410186,
+    safety_buffer_steps=1,
+    foraging_start_threshold=0.5526216959818051,
+    pheromone_follow_prob=0.6406957968582614,
+    food_richness_memory_regulator=0.0016976792966602104
 )
 
 renderer = SpaceRenderer(model=model, backend="matplotlib")

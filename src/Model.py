@@ -10,7 +10,7 @@ class Environment(Model):
                  n_food_clusters=12, food_area_percentage=0.15, 
                  food_base_quantity=10, pheromone_decay_rate=0.02,
                  safety_buffer_steps=2, foraging_start_threshold=0.9,
-                 pheromone_base_drop=1.0, pheromone_follow_prob=0.7,
+                 pheromone_follow_prob=0.7,
                  food_richness_memory_regulator=0.05,
                  seed=None): #RNG default for reproducibility
         
@@ -27,7 +27,6 @@ class Environment(Model):
         self.pheromone_decay_rate = pheromone_decay_rate
         self.safety_buffer_steps = safety_buffer_steps
         self.foraging_start_threshold = foraging_start_threshold
-        self.pheromone_base_drop = pheromone_base_drop
         self.pheromone_follow_prob = pheromone_follow_prob
         self.nest_coords = (width // 2, height // 2)
         self.nest_layer = PropertyLayer("nest", (width, height), default_value=0.0, dtype=float)

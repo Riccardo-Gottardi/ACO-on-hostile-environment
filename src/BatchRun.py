@@ -36,7 +36,6 @@ HYPOTHESIS_PARAMS = {
     "pheromone_follow_prob": 0.75,
     "foraging_start_threshold": 0.90,
     "safety_buffer_steps": 2,
-    "pheromone_base_drop": 1.0,
     "food_richness_memory_regulator": 0.05
 }
 
@@ -110,7 +109,6 @@ def objective(trial):
         "pheromone_decay_rate": trial.suggest_float("pheromone_decay_rate", 0.01, 0.1),
         "safety_buffer_steps": trial.suggest_int("safety_buffer_steps", 1, 5),
         "foraging_start_threshold": trial.suggest_float("foraging_start_threshold", 0.5, 1.0),
-        "pheromone_base_drop": trial.suggest_float("pheromone_base_drop", 0.0, 2.0),
         "pheromone_follow_prob": trial.suggest_float("pheromone_follow_prob", 0.0, 1.0),
         "food_richness_memory_regulator": trial.suggest_float("food_richness_memory_regulator", 1e-3, 5e-1, log=True)
     }
