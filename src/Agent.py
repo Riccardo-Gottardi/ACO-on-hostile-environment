@@ -30,12 +30,12 @@ class CreatureAgent(CellAgent):
         # Physiology / cost constants
         self.T_safe = 30.0
         self.T_crit = 53.0
-        self.cost_E_rest = 1.0         # Per-tick basal metabolism
-        self.cost_E_move = 2.0         # Per-cell additional cost when moving
-        self.cost_T_env = 0.05         # Per-tick heat gain when outside (independent of distance moved)
-        self.cool_rate = 2.0           # Per-tick heat loss when in nest
+        self.cost_E_rest = 0.5         # Per-tick basal metabolism
+        self.cost_E_move = 5.0         # Per-cell additional cost when moving
+        self.cost_T_env = 0.2         # Per-tick heat gain when outside (independent of distance moved)
+        self.cool_rate = 0.5           # Per-tick heat loss when in nest
         self.max_speed = 2
-        self.food_energy_gain = 750.0
+        self.food_energy_gain = 200.0
 
         # Memory
         self.food_richness_memory = 0.0
@@ -101,9 +101,9 @@ class CreatureAgent(CellAgent):
 
         if not (e_fast or h_fast):
             self.has_food = False
-            self.return_reason = RETURN_DANGER
+            self.return_reason = State.RETURN_DANGER
         else:
-            self.return_reason = RETURN_BOTH
+            self.return_reason = State.RETURN_BOTH
 
     # ---------- Cost charging ----------
 
